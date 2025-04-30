@@ -35,11 +35,14 @@ class SociollaUtils:
         
     def get_text_if_exists(self, xpath, default=""):
         """Get text of element if it exists, otherwise return default value"""
-        if self.verify_element_by_xpath(xpath):
-            try:
-                return self.driver.find_element(By.XPATH, xpath).text
-            except:
-                return default
+        try:
+            if self.verify_element_by_xpath(xpath):
+                element = self.driver.find_element(By.XPATH, xpath)
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                time.sleep(0.5)  # Short pause after scrolling
+                return element.text
+        except Exception as e:
+            print(f"Error getting text from {xpath}: {e}")
         return default
     
     def wait_for_element(self, xpath, timeout=10):
@@ -52,20 +55,70 @@ class SociollaUtils:
             return None
     
     def safe_click(self, xpath):
-        """Safely click an element"""
-        element = self.wait_for_element(xpath)
-        if element:
+        """Safely click an element with multiple strategies"""
+        try:
+            if not self.verify_element_by_xpath(xpath):
+                print(f"Element not found: {xpath}")
+                return False
+                
+            element = self.driver.find_element(By.XPATH, xpath)
+            
+            # Scroll element into view
+            self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+            time.sleep(1)  # Wait after scrolling
+            
+            # Try direct click
             try:
                 element.click()
+                time.sleep(1)  # Wait after clicking
                 return True
             except Exception as e:
-                print(f"Error clicking element: {e}")
-                try:
-                    self.driver.execute_script("arguments[0].click();", element)
-                    return True
-                except:
-                    return False
-        return False
+                print(f"Direct click failed: {e}")
+                
+            # Try JavaScript click
+            try:
+                self.driver.execute_script("arguments[0].click();", element)
+                time.sleep(1)  # Wait after clicking
+                return True
+            except Exception as e:
+                print(f"JavaScript click failed: {e}")
+                
+            return False
+        except Exception as e:
+            print(f"Safe click error on {xpath}: {e}")
+            return False
+    
+    def get_element_by_data_attr(self, attribute_prefix, element_type=None, class_name=None):
+        """Find element by data-v-* attribute with optional filtering by element type and class"""
+        xpath_parts = []
+        
+        # Start with element type or any element
+        if element_type:
+            xpath_parts.append(f"//{element_type}")
+        else:
+            xpath_parts.append("//*")
+        
+        # Add data attribute condition 
+        xpath_parts.append(f"[starts-with(@data-v, '{attribute_prefix}')]")
+        
+        # Add class condition if specified
+        if class_name:
+            xpath_parts.append(f"[contains(@class, '{class_name}')]")
+        
+        # Combine into a complete XPath
+        xpath = ''.join(xpath_parts)
+        
+        # Look for the element
+        if self.verify_element_by_xpath(xpath):
+            return self.driver.find_element(By.XPATH, xpath)
+        return None
+
+    def get_text_by_data_attr(self, attribute_prefix, element_type=None, class_name=None, default=""):
+        """Get text from element found by data-v-* attribute"""
+        element = self.get_element_by_data_attr(attribute_prefix, element_type, class_name)
+        if element:
+            return element.text.strip()
+        return default
     
     def clean_filename(self, filename):
         """Clean a string to make it suitable as a filename"""

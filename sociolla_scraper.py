@@ -89,151 +89,298 @@ def main():
         driver.quit()
 
 def extract_product_data(driver, utils, product_url):
-    """Extract all required data from a product page"""
+    """Extract all required data from a product page based on the specific structure of Sociolla"""
     product_data = {}
     
     # Basic product info
     product_data['URL_Product'] = product_url
     
-    # Wait for page to load properly
-    time.sleep(5)
+    # Wait for page to load properly - adjust timeout as needed
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "h1[class*='title']"))
+        )
+    except:
+        print("Page load timeout, proceeding anyway...")
     
-    # Product name - Try multiple selectors
-    product_data['product_name'] = utils.get_text_if_exists("//h1[@class='product-name']")
-    if not product_data['product_name']:
-        product_data['product_name'] = utils.get_text_if_exists("//h1[@itemprop='name']")
+    # Product name - Target the h1 element with title class using data-v-* attribute
+    product_name_selectors = [
+        "//h1[contains(@class, 'title')]",
+        "//h1[starts-with(@data-v, 'data-v-')]", 
+        "//h1[contains(@class, 'product-name')]"
+    ]
     
-    # Brand name - Try multiple approaches
-    product_data['brand'] = utils.get_text_if_exists("//a[@class='product-brand']")
-    if not product_data['brand']:
-        product_data['brand'] = utils.get_text_if_exists("//div[contains(@class,'product-brand')]/a")
+    for selector in product_name_selectors:
+        product_name = utils.get_text_if_exists(selector)
+        if product_name:
+            product_data['product_name'] = product_name.strip()
+            break
+    
+    # Brand name - From p.brand element containing an a tag
+    brand_selectors = [
+        "//p[contains(@class, 'brand')]/a",
+        "//p[starts-with(@data-v, 'data-v-')][contains(@class, 'brand')]/a",
+        "//div[contains(@class, 'brand')]/a"
+    ]
+    
+    for selector in brand_selectors:
+        brand = utils.get_text_if_exists(selector)
+        if brand:
+            product_data['brand'] = brand.strip()
+            break
     
     # Product type
-    product_data['product_type'] = "Skin Care"  # From the category URL
+    product_data['product_type'] = "Skin Care"
     
-    # Regular price and sale price
-    if utils.verify_element_by_xpath("//li[contains(@class,'pricing')]"):
-        if utils.verify_element_by_xpath("//li[contains(@class,'pricing hasdiscount')]"):
-            product_data['regular_price'] = utils.get_text_if_exists("//li[contains(@class,'pricing hasdiscount')]/span[@class='ori']")
-            product_data['sale_price'] = utils.get_text_if_exists("//li[contains(@class,'pricing hasdiscount')]/span[@class='after']")
-        else:
-            price = utils.get_text_if_exists("//li[contains(@class,'pricing')]/span")
-            product_data['regular_price'] = price
-            product_data['sale_price'] = price
+    # Price information - Look for elements containing pricing info
+    price_selectors = [
+        "//span[contains(@class, 'product_info-sale-percentage')]",
+        "//span[contains(@class, 'price-sales')]",
+        "//div[contains(@class, 'price')]//span",
+        "//span[contains(@class, 'product-price')]"
+    ]
+    
+    # Get sale percentage if available
+    sale_percentage = None
+    for selector in price_selectors:
+        percentage_text = utils.get_text_if_exists(selector)
+        if percentage_text and '%' in percentage_text:
+            sale_percentage = percentage_text
+            break
+    
+    # Get regular and sale prices
+    regular_price_selectors = [
+        "//span[contains(@class, 'price-normal')]",
+        "//span[contains(@class, 'original-price')]",
+        "//span[contains(@class, 'regular-price')]",
+        "//div[contains(@class, 'price')]//span[1]"
+    ]
+    
+    sale_price_selectors = [
+        "//span[contains(@class, 'price-sales')]",
+        "//span[contains(@class, 'sale-price')]",
+        "//div[contains(@class, 'price')]//span[2]"
+    ]
+    
+    # Try to get regular price
+    for selector in regular_price_selectors:
+        regular_price = utils.get_text_if_exists(selector)
+        if regular_price:
+            product_data['regular_price'] = regular_price.strip()
+            break
+    
+    # Try to get sale price if there's a sale percentage
+    if sale_percentage:
+        for selector in sale_price_selectors:
+            sale_price = utils.get_text_if_exists(selector)
+            if sale_price:
+                product_data['sale_price'] = sale_price.strip()
+                break
     
     # Rating and review count
-    product_data['rating'] = utils.get_text_if_exists("//li[@class='rating']")
-    review_count_text = utils.get_text_if_exists("//span[@class='review-counter']")
-    if review_count_text:
-        match = re.search(r'\d+', review_count_text)
-        product_data['review_count'] = match.group(0) if match else "0"
-    else:
+    rating_selectors = [
+        "//div[contains(@class, 'rating')]//span",
+        "//span[contains(@class, 'rating')]"
+    ]
+    
+    for selector in rating_selectors:
+        rating = utils.get_text_if_exists(selector)
+        if rating:
+            try:
+                # Extract numeric value
+                match = re.search(r'([0-9.]+)', rating)
+                if match:
+                    product_data['rating'] = match.group(1)
+                else:
+                    product_data['rating'] = rating
+                break
+            except:
+                product_data['rating'] = rating
+                break
+    
+    # If no rating was found, set default
+    if 'rating' not in product_data:
+        product_data['rating'] = "0"
+    
+    # Review count
+    review_count_selectors = [
+        "//span[contains(@class, 'review')]",
+        "//div[contains(@class, 'review-count')]"
+    ]
+    
+    for selector in review_count_selectors:
+        review_count_text = utils.get_text_if_exists(selector)
+        if review_count_text:
+            try:
+                match = re.search(r'\d+', review_count_text)
+                product_data['review_count'] = match.group(0) if match else "0"
+                break
+            except:
+                product_data['review_count'] = "0"
+                break
+    
+    if 'review_count' not in product_data:
         product_data['review_count'] = "0"
     
-    # DESCRIPTION TAB - Improved tab clicking and content extraction
-    utils.scroll_page(3)  # Scroll down to make tabs visible
-    time.sleep(1)
+    # Improved tab content extraction based on your screenshots
+    # First, find all tab elements
+    tabs_found = False
     
-    # Try different approaches for tab clicking
-    description_tab_found = False
+    # Look for tab navigation elements
+    tab_selectors = [
+        "//li[starts-with(@data-v, 'data-v-')]//a[@title='DESCRIPTION' or @title='HOW TO USE' or @title='INGREDIENTS']",
+        "//ul[contains(@class, 'nav-tabs')]//a",
+        "//div[contains(@class, 'tabs')]//a"
+    ]
     
-    # First try the original selector
-    if utils.verify_element_by_xpath("//a[@title='DESCRIPTION']"):
-        if utils.safe_click("//a[@title='DESCRIPTION']"):
-            description_tab_found = True
-            time.sleep(2)
+    # Try each selector to find tabs
+    for tab_selector in tab_selectors:
+        tab_elements = driver.find_elements(By.XPATH, tab_selector)
+        if tab_elements and len(tab_elements) > 0:
+            tabs_found = True
+            
+            # Loop through each tab and extract its content
+            for tab in tab_elements:
+                try:
+                    tab_title = tab.get_attribute("title")
+                    if not tab_title:
+                        tab_title = tab.text.strip().upper()
+                    
+                    # Click on the tab
+                    driver.execute_script("arguments[0].click();", tab)
+                    time.sleep(1)  # Wait for content to load
+                    
+                    # Extract content based on tab type
+                    if "DESCRIPTION" in tab_title:
+                        # Look for description content
+                        description_content_selectors = [
+                            "//div[@id='description']",
+                            "//div[contains(@class, 'tabs-content')]//div[contains(@id, 'description')]",
+                            "//div[contains(@class, 'tab-pane')][contains(@id, 'description')]"
+                        ]
+                        
+                        for selector in description_content_selectors:
+                            content = utils.get_text_if_exists(selector)
+                            if content:
+                                product_data['description'] = content.strip()
+                                break
+                    
+                    elif "HOW TO USE" in tab_title:
+                        # Look for how to use content
+                        how_to_use_content_selectors = [
+                            "//div[@id='how_to_use']",
+                            "//div[contains(@class, 'tabs-content')]//div[contains(@id, 'how_to_use')]",
+                            "//div[contains(@class, 'tab-pane')][contains(@id, 'how_to_use')]"
+                        ]
+                        
+                        for selector in how_to_use_content_selectors:
+                            content = utils.get_text_if_exists(selector)
+                            if content:
+                                product_data['how_to_use'] = content.strip()
+                                break
+                    
+                    elif "INGREDIENTS" in tab_title:
+                        # Look for ingredients content
+                        ingredients_content_selectors = [
+                            "//div[@id='ingredients']",
+                            "//div[contains(@class, 'tabs-content')]//div[contains(@id, 'ingredients')]",
+                            "//div[contains(@class, 'tab-pane')][contains(@id, 'ingredients')]"
+                        ]
+                        
+                        for selector in ingredients_content_selectors:
+                            content = utils.get_text_if_exists(selector)
+                            if content:
+                                product_data['ingredients'] = content.strip()
+                                break
+                
+                except Exception as e:
+                    print(f"Error processing tab {tab_title if 'tab_title' in locals() else 'unknown'}: {e}")
+            
+            # If we found and processed tabs, break out of the selector loop
+            break
     
-    # Try alternative selectors if first one failed
-    if not description_tab_found:
-        if utils.verify_element_by_xpath("//li/a[contains(text(),'DESCRIPTION')]"):
-            if utils.safe_click("//li/a[contains(text(),'DESCRIPTION')]"):
-                description_tab_found = True
-                time.sleep(2)
+    # If no tabs were found or content wasn't extracted, try direct content extraction
+    if not tabs_found or 'description' not in product_data:
+        # Try to directly find content without tab clicking
+        description = utils.get_text_if_exists("//div[contains(@class, 'product-description')]")
+        if description:
+            product_data['description'] = description.strip()
     
-    # Extract description with multiple approaches
-    product_data['description'] = utils.get_text_if_exists("//div[@id='description']")
-    if not product_data['description']:
-        product_data['description'] = utils.get_text_if_exists("//div[contains(@class,'tab-pane')][contains(@id,'description')]")
+    # Direct extraction for ingredients if not found via tabs
+    if 'ingredients' not in product_data:
+        ingredients = utils.get_text_if_exists("//div[contains(@id, 'ingredients')]")
+        if ingredients:
+            product_data['ingredients'] = ingredients.strip()
     
-    # HOW TO USE TAB
-    how_to_use_tab_found = False
+    # Direct extraction for how to use if not found via tabs
+    if 'how_to_use' not in product_data:
+        how_to_use = utils.get_text_if_exists("//div[contains(@id, 'how_to_use')]")
+        if how_to_use:
+            product_data['how_to_use'] = how_to_use.strip()
     
-    # First try the original selector
-    if utils.verify_element_by_xpath("//a[@title='HOW TO USE']"):
-        if utils.safe_click("//a[@title='HOW TO USE']"):
-            how_to_use_tab_found = True
-            time.sleep(2)
-    
-    # Try alternative selectors if first one failed
-    if not how_to_use_tab_found:
-        if utils.verify_element_by_xpath("//li/a[contains(text(),'HOW TO USE')]"):
-            if utils.safe_click("//li/a[contains(text(),'HOW TO USE')]"):
-                how_to_use_tab_found = True
-                time.sleep(2)
-    
-    # Extract how to use with multiple approaches
-    product_data['how_to_use'] = utils.get_text_if_exists("//div[@id='how_to_use']")
-    if not product_data['how_to_use']:
-        product_data['how_to_use'] = utils.get_text_if_exists("//div[contains(@class,'tab-pane')][contains(@id,'how_to_use')]")
-    
-    # INGREDIENTS TAB
-    ingredients_tab_found = False
-    
-    # First try the original selector
-    if utils.verify_element_by_xpath("//a[@title='INGREDIENTS']"):
-        if utils.safe_click("//a[@title='INGREDIENTS']"):
-            ingredients_tab_found = True
-            time.sleep(2)
-    
-    # Try alternative selectors if first one failed
-    if not ingredients_tab_found:
-        if utils.verify_element_by_xpath("//li/a[contains(text(),'INGREDIENTS')]"):
-            if utils.safe_click("//li/a[contains(text(),'INGREDIENTS')]"):
-                ingredients_tab_found = True
-                time.sleep(2)
-    
-    # Extract ingredients with multiple approaches
-    product_data['ingredients'] = utils.get_text_if_exists("//div[@id='ingredients']")
-    if not product_data['ingredients']:
-        product_data['ingredients'] = utils.get_text_if_exists("//div[contains(@class,'tab-pane')][contains(@id,'ingredients')]")
-    
-    # BPOM Number (might be in description or other tabs)
-    bpom_pattern = r'BPOM\s*:?\s*([A-Z0-9]+)'
-    description = product_data.get('description', '')
-    bpom_match = re.search(bpom_pattern, description)
-    if bpom_match:
-        product_data['bpom_number'] = bpom_match.group(1)
-    else:
-        product_data['bpom_number'] = ""
-    
-    # Image URL
-    image_element = None
-    if utils.verify_element_by_xpath("//img[@id='product-featured-image']"):
-        image_element = driver.find_element(By.XPATH, "//img[@id='product-featured-image']")
-    elif utils.verify_element_by_xpath("//div[contains(@class,'product-image')]//img"):
-        image_element = driver.find_element(By.XPATH, "//div[contains(@class,'product-image')]//img")
-    
-    if image_element:
-        product_data['image_url'] = image_element.get_attribute('src')
+    # BPOM Number extraction from description
+    if 'description' in product_data and product_data['description']:
+        bpom_patterns = [
+            r'BPOM\s*:?\s*([A-Z0-9]+)',
+            r'BPOM\s*No[.:]\s*([A-Z0-9]+)',
+            r'No\.\s*BPOM\s*:?\s*([A-Z0-9]+)'
+        ]
         
-        # Create a filename for the image
-        filename = f"{product_data.get('brand', 'unknown')}_{product_data.get('product_name', 'product')}"
-        
-        # Download image
-        local_path = utils.download_image(
-            product_data['image_url'], 
-            filename
-        )
-        product_data['local_image_path'] = local_path
-    else:
-        product_data['image_url'] = ""
-        product_data['local_image_path'] = ""
+        for pattern in bpom_patterns:
+            bpom_match = re.search(pattern, product_data['description'])
+            if bpom_match:
+                product_data['bpom_number'] = bpom_match.group(1)
+                break
     
-    # Print all extracted fields for debugging
-    print(f"Extracted data for product: {product_data.get('product_name', 'unknown')}")
-    print(f"- Brand: {product_data.get('brand', 'unknown')}")
-    print(f"- Description: {product_data.get('description', '')[:30]}...")
-    print(f"- Ingredients: {product_data.get('ingredients', '')[:30]}...")
+    # Image URL - Based on your screenshot showing an img.lazy-img element
+    image_selectors = [
+        "//img[contains(@class, 'lazy-img')]",
+        "//figure[contains(@class, 'gallery-preview')]//img",
+        "//div[contains(@class, 'gallery-product')]//img",
+        "//div[contains(@class, 'product-image')]//img"
+    ]
+    
+    for selector in image_selectors:
+        if utils.verify_element_by_xpath(selector):
+            try:
+                image_element = driver.find_element(By.XPATH, selector)
+                # Try multiple attributes for image URL
+                for attr in ['src', 'data-src', 'data-lazy-src']:
+                    image_url = image_element.get_attribute(attr)
+                    if image_url and not image_url.endswith('blank.gif') and not image_url.endswith('placeholder.png'):
+                        product_data['image_url'] = image_url
+                        
+                        # Create a filename for the image
+                        filename = f"{product_data.get('brand', 'unknown')}_{product_data.get('product_name', 'product')}".replace(' ', '_')
+                        
+                        # Download image
+                        local_path = utils.download_image(image_url, filename)
+                        product_data['local_image_path'] = local_path
+                        break
+                
+                if 'image_url' in product_data:
+                    break
+            except Exception as e:
+                print(f"Error getting image: {e}")
+                continue
+    
+    # Ensure we have values for all fields, even if empty
+    ensure_fields = [
+        'product_name', 'brand', 'product_type', 'regular_price', 'sale_price',
+        'rating', 'review_count', 'description', 'how_to_use', 'ingredients',
+        'bpom_number', 'image_url', 'local_image_path'
+    ]
+    
+    for field in ensure_fields:
+        if field not in product_data:
+            product_data[field] = ""
+    
+    # Print what we found for debugging
+    print(f"Extracted data for: {product_data.get('product_name', 'Unknown Product')}")
+    print(f"Brand: {product_data.get('brand', 'Unknown')}")
+    print(f"Description: {product_data.get('description', '')[:30]}..." if product_data.get('description') else "No description found")
+    print(f"Ingredients: {product_data.get('ingredients', '')[:30]}..." if product_data.get('ingredients') else "No ingredients found")
+    print(f"Image URL: {product_data.get('image_url', 'No image URL')}")
     
     return product_data
 
