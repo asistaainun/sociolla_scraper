@@ -24,25 +24,47 @@ class SociollaUtils:
             print(f"Scrolling increment {i}/{limit}")
             time.sleep(0.5)
     
-    def verify_element_by_xpath(self, xpath, timeout=5):
-        """Check if element exists by xpath"""
-        try:
-            self.driver.implicitly_wait(timeout)
-            self.driver.find_element(By.XPATH, xpath)
-            return True
-        except NoSuchElementException:
-            return False
+    def verify_element_by_xpath(self, xpath, timeout=3):
+        """Check if element exists by xpath with retry for stability"""
+        for attempt in range(2):  # Try twice
+            try:
+                self.driver.implicitly_wait(timeout)
+                elements = self.driver.find_elements(By.XPATH, xpath)
+                return len(elements) > 0
+            except Exception as e:
+                if attempt == 0:  # Only retry once
+                    time.sleep(0.5)
+                    continue
+                print(f"Error verifying element: {e}")
+                return False
+            finally:
+                self.driver.implicitly_wait(0)  # Reset wait
         
-    def get_text_if_exists(self, xpath, default=""):
-        """Get text of element if it exists, otherwise return default value"""
-        try:
-            if self.verify_element_by_xpath(xpath):
-                element = self.driver.find_element(By.XPATH, xpath)
-                self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
-                time.sleep(0.5)  # Short pause after scrolling
-                return element.text
-        except Exception as e:
-            print(f"Error getting text from {xpath}: {e}")
+    def get_text_if_exists(self, xpath, default="", max_retries=3):
+        """
+        Get text of element if it exists, with retry logic for stale elements
+        """
+        for attempt in range(max_retries):
+            try:
+                # Check if element exists first
+                elements = self.driver.find_elements(By.XPATH, xpath)
+                if not elements:
+                    return default
+                    
+                # Get text from the first element
+                text = elements[0].text.strip()
+                return text if text else default
+                
+            except Exception as e:
+                if "stale element reference" in str(e).lower() and attempt < max_retries - 1:
+                    print(f"Retrying after stale element ({attempt+1}/{max_retries}): {xpath}")
+                    time.sleep(0.5)
+                    continue
+                else:
+                    if attempt == max_retries - 1:
+                        print(f"Failed to get text after {max_retries} attempts: {xpath}")
+                    return default
+        
         return default
     
     def wait_for_element(self, xpath, timeout=10):
